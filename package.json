@@ -1,7 +1,7 @@
 {
   "name": "pipe-dreams",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Rotate pipes to guide the water through increasingly tricky levels.",
   "author": "jd4rider",
   "type": "module",
