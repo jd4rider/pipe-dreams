@@ -13,6 +13,19 @@ export const DIRS = [
 // Base (rot 0) openings per pipe kind.
 export const KINDS = { cap: N, straight: N | S, elbow: N | E, tee: N | E | S, cross: N | E | S | W }
 
+// Neighbour of (r, c) in direction d; wraps to the opposite edge when `wrap` is on.
+export function neighbour(rows, cols, wrap, r, c, d) {
+  let nr = r + d.dr
+  let nc = c + d.dc
+  if (wrap) {
+    nr = (nr + rows) % rows
+    nc = (nc + cols) % cols
+  } else if (nr < 0 || nc < 0 || nr >= rows || nc >= cols) {
+    return null
+  }
+  return [nr, nc]
+}
+
 export const rotateMask = (m, times = 1) => {
   let out = m
   for (let i = 0; i < ((times % 4) + 4) % 4; i++) out = ((out << 1) | (out >> 3)) & 15
@@ -53,17 +66,18 @@ const shuffle = (arr, rnd) => {
 }
 
 // A random self-avoiding path between two cells; null if the budget runs out.
-function findPath(rows, cols, from, to, rnd, minLen) {
+function findPath(rows, cols, from, to, rnd, minLen, wrap = false, needWrap = false) {
   const seen = new Set()
   const path = []
   let budget = 4000
+  let wraps = 0
   const key = (r, c) => r * cols + c
   const dfs = (r, c) => {
     if (budget-- <= 0) return false
     seen.add(key(r, c))
     path.push([r, c])
     if (r === to[0] && c === to[1]) {
-      if (path.length >= minLen) return true
+      if (path.length >= minLen && (!needWrap || wraps > 0)) return true
     } else {
       // Bias toward the target so early levels are not absurdly long.
       const order = shuffle([...DIRS], rnd).sort((a, b) => {
@@ -72,11 +86,14 @@ function findPath(rows, cols, from, to, rnd, minLen) {
         return da - db + (rnd() - 0.5) * 3
       })
       for (const d of order) {
-        const nr = r + d.dr
-        const nc = c + d.dc
-        if (nr < 0 || nc < 0 || nr >= rows || nc >= cols || seen.has(key(nr, nc))) continue
+        const nb = neighbour(rows, cols, wrap, r, c, d)
+        if (!nb || seen.has(key(nb[0], nb[1]))) continue
+        const [nr, nc] = nb
         if (nr === to[0] && nc === to[1] && path.length + 1 < minLen) continue
+        const wrapped = nr !== r + d.dr || nc !== c + d.dc
+        if (wrapped) wraps++
         if (dfs(nr, nc)) return true
+        if (wrapped) wraps--
       }
     }
     path.pop()
@@ -92,7 +109,7 @@ function findPath(rows, cols, from, to, rnd, minLen) {
  * tile: { kind|null, rot, solRot, fixed, role: 'source'|'drain'|'path'|'branch'|'decoy'|'wall' }
  */
 export function generate(spec) {
-  const { rows, cols, seed, branches = 0, decoys = 0.5, walls = 0, locked = 0, minLen = 4 } = spec
+  const { rows, cols, seed, branches = 0, decoys = 0.5, walls = 0, locked = 0, minLen = 4, wrap = false } = spec
   const rnd = mulberry32(seed)
   let path = null
   let from
@@ -100,7 +117,7 @@ export function generate(spec) {
   for (let attempt = 0; attempt < 60 && !path; attempt++) {
     from = [Math.floor(rnd() * rows), 0]
     to = [Math.floor(rnd() * rows), cols - 1]
-    path = findPath(rows, cols, from, to, rnd, Math.max(2, minLen - Math.floor(attempt / 10)))
+    path = findPath(rows, cols, from, to, rnd, Math.max(2, minLen - Math.floor(attempt / 10)), wrap, wrap && attempt < 40)
   }
   if (!path) {
     // Always solvable fallback: straight run along the top row.
@@ -112,7 +129,10 @@ export function generate(spec) {
   const masks = Array.from({ length: rows }, () => Array(cols).fill(0))
   const role = Array.from({ length: rows }, () => Array(cols).fill(null))
   const connect = ([r1, c1], [r2, c2]) => {
-    const d = DIRS.find((x) => r1 + x.dr === r2 && c1 + x.dc === c2)
+    const d = DIRS.find((x) => {
+      const nb = neighbour(rows, cols, wrap, r1, c1, x)
+      return nb && nb[0] === r2 && nb[1] === c2
+    })
     masks[r1][c1] |= d.bit
     masks[r2][c2] |= d.opp
   }
@@ -123,15 +143,15 @@ export function generate(spec) {
   path.slice(1, -1).forEach(([r, c]) => {
     if (rnd() >= branches) return
     const options = DIRS.filter((d) => {
-      const nr = r + d.dr
-      const nc = c + d.dc
-      return nr >= 0 && nc >= 0 && nr < rows && nc < cols && !role[nr][nc] && !(masks[r][c] & d.bit)
+      const nb = neighbour(rows, cols, wrap, r, c, d)
+      return nb && !role[nb[0]][nb[1]] && !(masks[r][c] & d.bit)
     })
     if (!options.length) return
     const d = options[Math.floor(rnd() * options.length)]
+    const [br, bc] = neighbour(rows, cols, wrap, r, c, d)
     masks[r][c] |= d.bit
-    masks[r + d.dr][c + d.dc] |= d.opp
-    role[r + d.dr][c + d.dc] = 'branch'
+    masks[br][bc] |= d.opp
+    role[br][bc] = 'branch'
   })
 
   const tiles = Array.from({ length: rows }, () => Array(cols).fill(null))
@@ -158,7 +178,7 @@ export function generate(spec) {
     if (rnd() < locked) tiles[r][c].fixed = true
   })
 
-  const puzzle = { rows, cols, tiles, source: path[0], drain: path[path.length - 1], path, par: 0 }
+  const puzzle = { rows, cols, wrap, tiles, source: path[0], drain: path[path.length - 1], path, par: 0 }
   // Scramble until it is genuinely unsolved.
   for (let tries = 0; tries < 30; tries++) {
     for (const row of tiles) {
@@ -187,9 +207,9 @@ export function flood(p) {
     const m = maskOf(p.tiles[r][c])
     for (const d of DIRS) {
       if (!(m & d.bit)) continue
-      const nr = r + d.dr
-      const nc = c + d.dc
-      if (nr < 0 || nc < 0 || nr >= p.rows || nc >= p.cols || dist.has(key(nr, nc))) continue
+      const nb = neighbour(p.rows, p.cols, p.wrap, r, c, d)
+      if (!nb || dist.has(key(nb[0], nb[1]))) continue
+      const [nr, nc] = nb
       if (!(maskOf(p.tiles[nr][nc]) & d.opp)) continue
       dist.set(key(nr, nc), dist.get(key(r, c)) + 1)
       q.push([nr, nc])
@@ -249,6 +269,9 @@ export const WORLDS = [
 ]
 export const LEVELS_PER_WORLD = 12
 
+// Every 4th level from 6 on lets water leave one edge and re-enter on the opposite side.
+export const isWrapLevel = (n) => n >= 6 && n % 4 === 2
+
 export function levelSpec(n) {
   const i = n - 1
   const size = Math.min(9, 4 + Math.floor(i / 12))
@@ -262,6 +285,7 @@ export function levelSpec(n) {
     walls: n > 12 ? Math.min(0.2, (n - 12) * 0.005) : 0,
     locked: n > 24 ? Math.min(0.25, (n - 24) * 0.007) : 0,
     minLen: Math.min(size * size - 2, size + 2 + Math.floor(i / 3)),
+    wrap: isWrapLevel(n),
   }
 }
 
@@ -279,5 +303,6 @@ export function rushSpec(solved, seed) {
     walls: solved > 6 ? 0.08 : 0,
     locked: solved > 10 ? 0.1 : 0,
     minLen: size + 2,
+    wrap: solved % 4 === 3,
   }
 }

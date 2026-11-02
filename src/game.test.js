@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { generate, levelPuzzle, isSolved, turn, flood, parFor, hintTile, rotateMask, kindOf, KINDS, starsFor, TOTAL_LEVELS, rushSpec, maskOf, N, E, S, W } from './game.js'
+import { generate, levelPuzzle, isSolved, turn, flood, parFor, hintTile, rotateMask, kindOf, KINDS, starsFor, TOTAL_LEVELS, rushSpec, maskOf, isWrapLevel, N, E, S, W } from './game.js'
 
 test('rotateMask cycles clockwise', () => {
   assert.equal(rotateMask(N), E)
@@ -58,4 +58,15 @@ test('star rating rewards efficiency', () => {
   assert.equal(starsFor(10, 10), 3)
   assert.equal(starsFor(20, 10), 2)
   assert.equal(starsFor(60, 10), 1)
+})
+
+test('wrap levels route water through the board edges', () => {
+  const wraps = Array.from({ length: TOTAL_LEVELS }, (_, i) => i + 1).filter(isWrapLevel)
+  assert.ok(wraps.length > 5)
+  for (const n of wraps) {
+    const p = levelPuzzle(n)
+    assert.ok(p.wrap)
+    const usesWrap = p.path.some(([r, c], i) => i && Math.abs(r - p.path[i - 1][0]) + Math.abs(c - p.path[i - 1][1]) > 1)
+    assert.ok(usesWrap, `level ${n} never wraps`)
+  }
 })

@@ -1,7 +1,7 @@
 {
   "name": "pipe-dreams",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Rotate pipes to guide the water through increasingly tricky levels.",
   "author": "jd4rider",
   "type": "module",
@@ -29,17 +29,55 @@
   "build": {
     "appId": "com.jd4rider.pipedreams",
     "productName": "Pipe Dreams",
-    "directories": { "output": "release", "buildResources": "build" },
-    "files": ["dist/**/*", "electron/**/*", "package.json"],
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
     "mac": {
       "category": "public.app-category.puzzle-games",
       "icon": "build/icon.icns",
       "artifactName": "Pipe-Dreams-mac-${arch}.${ext}",
-      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }]
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
     },
-    "dmg": { "title": "Pipe Dreams ${version}" },
-    "win": { "icon": "build/icon-1024.png", "target": [{ "target": "nsis", "arch": ["x64"] }] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "artifactName": "Pipe-Dreams-win-setup.${ext}" },
-    "linux": { "category": "Game", "icon": "build/icon-1024.png", "artifactName": "Pipe-Dreams-linux-${arch}.${ext}", "target": ["AppImage"] }
+    "dmg": {
+      "title": "Pipe Dreams ${version}"
+    },
+    "win": {
+      "icon": "build/icon-1024.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "Pipe-Dreams-win-setup.${ext}"
+    },
+    "linux": {
+      "category": "Game",
+      "icon": "build/icon-1024.png",
+      "artifactName": "Pipe-Dreams-linux-${arch}.${ext}",
+      "target": [
+        "AppImage"
+      ]
+    }
   }
 }

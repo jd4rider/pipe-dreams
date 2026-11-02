@@ -3,7 +3,7 @@ import { W, H, background, button, text, fade } from './common.js'
 import { ring, flashAt, popText, droplets } from './fx.js'
 import { audioState, sfx } from '../sound.js'
 import { data, persist } from './save.js'
-import { flood, isSolved, turn, hintTile, starsFor, generate, rushSpec, levelPuzzle, TOTAL_LEVELS, WORLDS, LEVELS_PER_WORLD } from '../game.js'
+import { flood, isSolved, maskOf, turn, hintTile, starsFor, generate, rushSpec, levelPuzzle, TOTAL_LEVELS, WORLDS, LEVELS_PER_WORLD } from '../game.js'
 
 const BOARD_TOP = 140
 const BOARD_H = 640
@@ -55,6 +55,7 @@ export default class GameScene extends Phaser.Scene {
     }, { ...opts, color: 0x374151 }).setDepth(32)
     button(this, 545, y, this.mode === 'puzzle' ? 'Levels' : 'Menu', () => this.leave(), { ...opts, color: 0x374151 }).setDepth(32)
 
+    this.time.addEvent({ delay: 180, loop: true, callback: () => this.ambient() })
     this.toast = text(this, W / 2, 400, '', 38, '#fde68a', { fontStyle: 'bold', stroke: '#000', strokeThickness: 6 }).setOrigin(0.5).setDepth(50).setAlpha(0)
 
     if (this.mode === 'rush') {
@@ -104,6 +105,27 @@ export default class GameScene extends Phaser.Scene {
     panel.lineStyle(3, this.world.color, 0.6).strokeRoundedRect(ox - 12, oy - 12, bw + 24, bh + 24, 22)
     layer.add(panel)
 
+    this.portals = []
+    if (p.wrap) {
+      const slots = []
+      for (let r = 0; r < p.rows; r++) {
+        slots.push([r, 0, 8, ox - 7, oy + r * cell + cell / 2, 'v'], [r, p.cols - 1, 2, ox + bw + 7, oy + r * cell + cell / 2, 'v'])
+      }
+      for (let c = 0; c < p.cols; c++) {
+        slots.push([0, c, 1, ox + c * cell + cell / 2, oy - 7, 'h'], [p.rows - 1, c, 4, ox + c * cell + cell / 2, oy + bh + 7, 'h'])
+      }
+      slots.forEach(([r, c, bit, x, y, o], i) => {
+        const glow = this.add.image(x, y, 'glow').setTint(0xc084fc).setBlendMode('ADD').setScale(0.5).setAlpha(0.3)
+        const bar = this.add.rectangle(x, y, o === 'v' ? 8 : cell * 0.5, o === 'v' ? cell * 0.5 : 8, 0xe9d5ff, 0.9).setAlpha(0.35)
+        layer.add([glow, bar])
+        this.tweens.add({ targets: glow, scale: 0.75, duration: 900, yoyo: true, repeat: -1, delay: i * 70, ease: 'Sine.InOut' })
+        this.portals.push({ r, c, bit, glow, bar, lit: false })
+      })
+      const edge = this.add.graphics()
+      edge.lineStyle(3, 0xc084fc, 0.9).strokeRoundedRect(ox - 12, oy - 12, bw + 24, bh + 24, 22)
+      layer.add(edge)
+    }
+
     const k = cell / 96
     this.cells = p.tiles.map((row, r) =>
       row.map((t, c) => {
@@ -144,7 +166,7 @@ export default class GameScene extends Phaser.Scene {
 
   async intro() {
     const label = `Level ${this.level}`
-    const sub = this.puzzle.par ? 'Turn the pipes so the water flows from IN to OUT' : ''
+    const sub = this.puzzle.wrap ? 'Purple edges are portals: water leaves one side and re-enters the other!' : this.puzzle.par ? 'Turn the pipes so the water flows from IN to OUT' : ''
     sfx.whoosh()
     const cy = BOARD_TOP + BOARD_H / 2
     const band = this.add.rectangle(W / 2, cy, W, 170, 0x000000, 0.75).setDepth(40).setScale(1, 0)
@@ -264,8 +286,25 @@ export default class GameScene extends Phaser.Scene {
         const wet = d !== undefined
         if (wet && !e.wet) {
           e.wet = true
+          const delay = d * (slow ? 90 : 35)
           this.tweens.killTweensOf(e.water)
-          this.tweens.add({ targets: e.water, alpha: 1, duration: 260, delay: d * (slow ? 90 : 35) })
+          this.tweens.add({
+            targets: e.water,
+            alpha: 1,
+            duration: 260,
+            delay,
+            onComplete: () => {
+              if (!e.wet) return
+              this.tweens.add({ targets: e.water, alpha: 0.72, duration: 700 + ((r * 7 + c * 13) % 5) * 120, yoyo: true, repeat: -1, ease: 'Sine.InOut' })
+            },
+          })
+          this.time.delayedCall(delay, () => {
+            if (!e.wet || !e.cont.active) return
+            const [x, y] = this.centre(r, c)
+            flashAt(this, x, y, this.cell * 1.3, 0x7dd3fc)
+            droplets(this, x, y, 4, 150)
+            this.tweens.add({ targets: e.cont, scale: e.k * 1.1, duration: 110, yoyo: true })
+          })
         } else if (!wet && e.wet) {
           e.wet = false
           this.tweens.killTweensOf(e.water)
@@ -273,7 +312,35 @@ export default class GameScene extends Phaser.Scene {
         }
       }),
     )
+    this.portals?.forEach((pt) => {
+      const open = !!(maskOf(p.tiles[pt.r][pt.c]) & pt.bit) && dist.has(pt.r * p.cols + pt.c)
+      if (open !== pt.lit) {
+        pt.lit = open
+        this.tweens.add({ targets: [pt.glow, pt.bar], alpha: open ? 1 : 0.35, duration: 200 })
+        if (open) {
+          const x = pt.glow.x
+          const y = pt.glow.y
+          ring(this, x, y, 0xc084fc, 70, 600, 4)
+          droplets(this, x, y, 8, 200)
+        }
+      }
+    })
     return dist
+  }
+
+  // Bubbles and sparkles drifting up from flowing pipes.
+  ambient() {
+    if (this.phase !== 'play' && this.phase !== 'won') return
+    const wet = []
+    this.cells?.forEach((row, r) => row.forEach((e, c) => e.wet && e.cont.active && wet.push([r, c])))
+    for (let i = 0; i < Math.min(3, wet.length); i++) {
+      const [r, c] = wet[Math.floor(Math.random() * wet.length)]
+      const [x, y] = this.centre(r, c)
+      const px = x + (Math.random() - 0.5) * this.cell * 0.5
+      const py = y + (Math.random() - 0.5) * this.cell * 0.4
+      const b = this.add.circle(px, py, 2 + Math.random() * 3, 0xe0f2fe, 0.85).setDepth(14).setBlendMode('ADD')
+      this.tweens.add({ targets: b, y: py - 26 - Math.random() * 20, x: px + (Math.random() - 0.5) * 14, alpha: 0, scale: 0.4, duration: 800 + Math.random() * 500, onComplete: () => b.destroy() })
+    }
   }
 
   hint() {
@@ -340,14 +407,19 @@ export default class GameScene extends Phaser.Scene {
         if (!this.cells[r]?.[c]?.cont?.active) return
         if (d % 2 === 0) sfx.flow(d)
         const [x, y] = this.centre(r, c)
-        droplets(this, x, y, 3, 120)
+        droplets(this, x, y, 5, 180)
+        ring(this, x, y, 0x7dd3fc, this.cell * 0.9, 500, 3)
+        flashAt(this, x, y, this.cell * 1.6, 0xe0f2fe)
       })
     })
     await this.delay(maxD * 90 + 500)
     const [dx, dy] = this.centre(...p.drain)
     sfx.splash()
-    droplets(this, dx, dy, 26, 520, true)
+    droplets(this, dx, dy, 44, 620, true)
     ring(this, dx, dy, 0x7dd3fc, 260, 800, 8)
+    ring(this, dx, dy, 0xffffff, 380, 1000, 4)
+    ring(this, dx, dy, 0x38bdf8, 520, 1200, 3)
+    for (let i = 0; i < 6; i++) this.time.delayedCall(i * 90, () => droplets(this, dx + Phaser.Math.Between(-30, 30), dy, 14, 560, true))
     flashAt(this, dx, dy, 360, 0x7dd3fc)
     this.cameras.main.shake(180, 0.006)
 
